@@ -17,20 +17,12 @@ logger = logging.getLogger(__name__)
 class RAGSystem:
     """Complete RAG system integrating all components."""
     
-    def __init__(self, config: Dict[str, Any]):
-        """
-        Initialize the RAG system with configuration.
-        
-        Args:
-            config: System configuration dictionary
-        """
+    def __init__(self, config: Dict[str, Any], model_manager=None):
         self.config = config
         
-        # Initialize components
         self.doc_processor = DocumentProcessorFactory()
         self.chunker_factory = ChunkerFactory(config.get('chunking', {}))
         
-        # Map config key to the embedder's expected parameter
         raw_embedding_config = dict(config.get('embedding', {}))
         raw_embedding_config.setdefault('model_name', raw_embedding_config.pop('default_model', 'all-MiniLM-L6-v2'))
 
@@ -47,8 +39,9 @@ class RAGSystem:
             self.vector_store, self.embedder
         )
         
-        # Set up generation factory and default generator
-        self.generator_factory = GeneratorFactory(config.get('generation', {}))
+        self.generator_factory = GeneratorFactory(
+            config.get('generation', {}), model_manager=model_manager
+        )
         self.generator = self.generator_factory.get_default_generator()
         
         evaluation_factory = EvaluationFactory(config.get('evaluation', {}))
@@ -112,41 +105,11 @@ class RAGSystem:
         logger.info(f"Ingestion complete: {processed_docs} documents, {total_chunks} chunks")
         return summary
     
-    def query(self, question: str, top_k: int = 5, model_type: Optional[str] = None, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
-        """
-        Query the RAG system.
-        
-        Args:
-            question: User question
-            top_k: Number of results to retrieve
-            
-        Returns:
-            Query result with answer and metadata
-        """
+    def query(self, question: str, top_k: int = 5, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
         try:
-            # Retrieve relevant documents
             retrieval_result = self.retriever.retrieve(question, top_k=top_k)
-            
-            # Decide which generator to use
-            generator = self.generator
-            chosen_model_type: Optional[str] = None
-            if model_type:
-                # Allow callers to specify a concrete generator type, e.g. "openai" or "gemini"
-                chosen_model_type = model_type.lower()
-                override_generator = self.generator_factory.get_generator(chosen_model_type)
-                if override_generator is not None:
-                    generator = override_generator
-                else:
-                    # Fall back to default while logging the issue
-                    logger.warning(
-                        f"Requested model_type='{model_type}' not found. "
-                        f"Falling back to default generator."
-                    )
-                    chosen_model_type = None
-            
-            # Generate answer
             context = retrieval_result.get_context()
-            generation_result = generator.generate(question, context, chat_history=chat_history)
+            generation_result = self.generator.generate(question, context, chat_history=chat_history)
             
             return {
                 "question": question,
@@ -154,7 +117,8 @@ class RAGSystem:
                 "context": context,
                 "retrieval_metadata": retrieval_result.metadata,
                 "generation_metadata": generation_result.metadata,
-                "model_type": chosen_model_type,
+                "model_id": generation_result.metadata.get("model_id"),
+                "model_name": generation_result.metadata.get("model"),
                 "retrieved_chunks": len(retrieval_result.results)
             }
             

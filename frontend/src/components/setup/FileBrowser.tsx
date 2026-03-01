@@ -41,8 +41,8 @@ export function FileBrowser({ onSelect, onCancel, filterExtensions = [".gguf"] }
         setSearchQuery("");
         try {
             const url = path
-                ? `http://127.0.0.1:8000/setup/browse?path=${encodeURIComponent(path)}`
-                : "http://127.0.0.1:8000/setup/browse";
+                ? `/api/rag/browse?path=${encodeURIComponent(path)}`
+                : "/api/rag/browse";
             const res = await fetch(url);
             if (!res.ok) {
                 const detail = await res.json().catch(() => ({ detail: "Failed to browse" }));
@@ -68,6 +68,9 @@ export function FileBrowser({ onSelect, onCancel, filterExtensions = [".gguf"] }
         if (filterExtensions.length === 0) return true;
         return filterExtensions.some((ext) => item.ext === ext);
     });
+
+    // Check if current directory has .gguf files (for folder selection)
+    const hasGgufFiles = items.some((item) => !item.is_dir && item.ext === ".gguf");
 
     const formatSize = (bytes: number | null) => {
         if (bytes === null) return "";
@@ -143,8 +146,8 @@ export function FileBrowser({ onSelect, onCancel, filterExtensions = [".gguf"] }
                                 onClick={() => item.is_dir ? browse(item.path) : setSelectedFile(item.path)}
                                 onDoubleClick={() => { if (!item.is_dir) onSelect(item.path); }}
                                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${selectedFile === item.path
-                                        ? "bg-blue-500/15 border border-blue-500/30"
-                                        : "hover:bg-white/5 border border-transparent"
+                                    ? "bg-blue-500/15 border border-blue-500/30"
+                                    : "hover:bg-white/5 border border-transparent"
                                     }`}
                             >
                                 {item.is_dir
@@ -166,6 +169,14 @@ export function FileBrowser({ onSelect, onCancel, filterExtensions = [".gguf"] }
                         <button onClick={onCancel} className="px-4 py-2 text-sm font-medium text-neutral-400 bg-white/5 rounded-xl hover:bg-white/10 transition-colors border border-white/10">
                             Cancel
                         </button>
+                        {hasGgufFiles && !selectedFile && (
+                            <button
+                                onClick={() => onSelect(currentPath)}
+                                className="px-5 py-2 text-sm font-medium text-white bg-emerald-600 rounded-xl hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-900/30"
+                            >
+                                Use This Folder
+                            </button>
+                        )}
                         <button
                             onClick={() => selectedFile && onSelect(selectedFile)}
                             disabled={!selectedFile}

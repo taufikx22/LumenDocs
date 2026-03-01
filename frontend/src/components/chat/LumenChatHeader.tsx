@@ -1,26 +1,35 @@
 import { ChatMessage } from "@/components/chat/types";
+import { ModelSelector } from "@/components/chat/ModelSelector";
 import { Button } from "@/components/ui/button";
 
+interface ActiveModel {
+  loaded: boolean;
+  id?: string;
+  name?: string;
+}
+
 interface LumenChatHeaderProps {
-  selectedModel: string;
+  activeModel: ActiveModel | null;
   isSending: boolean;
   uploadStatus: string | null;
   messages: ChatMessage[];
   onClear: () => void;
+  onSwitchModel: (modelId: string) => Promise<void>;
+  onManageModels: () => void;
 }
 
 export function LumenChatHeader({
-  selectedModel, isSending, uploadStatus, messages, onClear,
+  activeModel, isSending, uploadStatus, messages,
+  onClear, onSwitchModel, onManageModels,
 }: LumenChatHeaderProps) {
   return (
     <div className="px-6 py-3 border-b border-white/5 flex items-center justify-between text-[11px] text-neutral-400 font-medium tracking-tight">
       <div className="flex items-center gap-4">
-        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/5 border border-white/5">
-          <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)] animate-pulse" />
-          <span>
-            <span className="opacity-60">Model:</span> <span className="text-neutral-200 capitalize">{selectedModel}</span>
-          </span>
-        </div>
+        <ModelSelector
+          activeModel={activeModel}
+          onSwitch={onSwitchModel}
+          onManageModels={onManageModels}
+        />
         {isSending && (
           <span className="flex items-center gap-2 text-blue-400">
             <span className="animate-bounce">●</span>

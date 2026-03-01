@@ -1,89 +1,33 @@
-from typing import Dict, Type, Optional
+from typing import Optional
 import logging
 
 from src.generation.base import BaseGenerator
-from src.generation.openai_generator import OpenAIGenerator
 from src.generation.local_generator import LocalLLMGenerator
-from src.generation.gemini_generator import GeminiGenerator
 
 logger = logging.getLogger(__name__)
 
 
 class GeneratorFactory:
-    """Factory for creating generator instances."""
-    
-    def __init__(self, config=None):
-        """
-        Initialize generator factory.
-        
-        Args:
-            config: Optional configuration dictionary
-        """
+    """Factory for creating generator instances — local-only."""
+
+    def __init__(self, config=None, model_manager=None):
         self.config = config or {}
-        self._generators: Dict[str, Type[BaseGenerator]] = {}
-        
-        # Register default generators
-        self.register_generator("openai", OpenAIGenerator)
-        self.register_generator("local", LocalLLMGenerator)
-        self.register_generator("gemini", GeminiGenerator)
-    
-    def register_generator(self, name: str, generator_class: Type[BaseGenerator]) -> None:
-        """Register a generator class."""
-        self._generators[name.lower()] = generator_class
-        logger.debug(f"Registered generator {generator_class.__name__} as '{name}'")
-    
-    def get_generator(self, model_type: str) -> Optional[BaseGenerator]:
-        """
-        Get a generator instance.
-        
-        Args:
-            model_type: Type of generator to create
-            
-        Returns:
-            Configured generator instance or None
-        """
-        model_type = model_type.lower()
-        generator_class = self._generators.get(model_type)
-        
-        if not generator_class:
-            logger.error(f"No generator found for type '{model_type}'")
-            return None
-        
-        # Get configuration for this generator type
-        generator_config = {}
-        if self.config and "models" in self.config:
-            # Find matching model configuration
-            for model_config in self.config["models"]:
-                if model_config.get("type") == model_type:
-                    generator_config = {
-                        k: v for k, v in model_config.items() 
-                        if k not in ["name", "type"]
-                    }
-                    break
-        
-        try:
-            return generator_class(**generator_config)
-        except Exception as e:
-            logger.error(f"Error creating generator '{model_type}': {str(e)}")
-            return None
-    
+        self._model_manager = model_manager
+        self._generator: Optional[LocalLLMGenerator] = None
+
     def get_default_generator(self) -> BaseGenerator:
-        """Get the default generator as specified in config."""
-        default_type = "local"
-        
-        if self.config:
-            default_type = self.config.get("default_type", default_type)
-
-        generator = self.get_generator(default_type)
-        if not generator:
-            logger.warning(
-                f"Default generator '{default_type}' failed. "
-                f"Trying 'local'."
+        if not self._generator:
+            self._generator = LocalLLMGenerator(
+                model_manager=self._model_manager,
+                system_prompt=self.config.get("system_prompt"),
             )
-            generator = self.get_generator("local")
-            
-            if not generator:
-                raise RuntimeError("Could not create any generator")
-        
-        return generator
+        return self._generator
 
+    def get_generator(self, model_type: str) -> Optional[BaseGenerator]:
+        # Everything is local now
+        return self.get_default_generator()
+
+    def set_model_manager(self, manager):
+        self._model_manager = manager
+        if self._generator:
+            self._generator.set_model_manager(manager)

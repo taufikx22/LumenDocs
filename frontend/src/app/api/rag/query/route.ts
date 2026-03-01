@@ -14,12 +14,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing `question` in request body." }, { status: 400 });
     }
 
-    const { question, top_k, model } = body as {
-      question: string;
-      top_k?: number;
-      model?: string | null;
-    };
-
     if (!RAG_API_BASE_URL) {
       return NextResponse.json({ error: "RAG backend URL not configured on the server." }, { status: 500 });
     }
@@ -28,9 +22,9 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        question,
-        top_k: typeof top_k === "number" ? top_k : 5,
-        model: model ?? undefined,
+        question: body.question,
+        top_k: typeof body.top_k === "number" ? body.top_k : 5,
+        session_id: body.session_id ?? undefined,
       }),
     });
 

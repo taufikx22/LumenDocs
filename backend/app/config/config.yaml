@@ -1,25 +1,10 @@
 embedding:
   default_model: all-MiniLM-L6-v2
 generation:
-  default_model: llama3
-  default_type: local
-  models:
-    - max_tokens: 1024
-      model: llama3
-      temperature: 0.2
-      type: local
-    - max_tokens: 1024
-      model: mistral
-      temperature: 0.2
-      type: local
-    - max_tokens: 1024
-      model: gpt-3.5-turbo
-      temperature: 0.2
-      type: openai
-    - max_tokens: 1024
-      model: gemini-2.0-flash-exp
-      temperature: 0.2
-      type: gemini
+  default_context_size: 4096
+  default_temperature: 0.2
+  default_max_tokens: 1024
+  gpu_layers: -1
 retrieval:
   default_strategy: semantic
   strategies:

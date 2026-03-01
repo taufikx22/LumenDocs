@@ -1,9 +1,6 @@
 import logging
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, List
 from datetime import datetime
-import os
-import requests
-import json
 
 from src.generation.base import BaseGenerator, GenerationResult
 
@@ -11,62 +8,19 @@ logger = logging.getLogger(__name__)
 
 
 class LocalLLMGenerator(BaseGenerator):
-    """Local LLM generator using Ollama or similar local APIs."""
-    
-    def __init__(
-        self,
-        model: str = "llama3",
-        base_url: Optional[str] = None,
-        temperature: float = 0.2,
-        max_tokens: int = 1024,
-        system_prompt: Optional[str] = None,
-        timeout: int = 120
-    ):
-        """
-        Initialize local LLM generator.
-        
-        Args:
-            model: Local model name
-            base_url: Base URL for the local LLM API
-            temperature: Sampling temperature
-            max_tokens: Maximum tokens to generate
-            system_prompt: Optional system prompt
-            timeout: Request timeout in seconds
-        """
-        self.model = model
-        
-        # Determine base URL (priority: passed arg > env var > default)
-        env_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-        self.base_url = (base_url or env_url).rstrip('/')
-        
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.timeout = timeout
-        
-        # Default system prompt
-        self.system_prompt = system_prompt or """
-You are a helpful AI assistant. Answer the user's question based on the provided context.
-If the context doesn't contain enough information to fully answer the question, say so clearly.
-Be accurate, concise, and helpful.
-"""
-        
-        # Test connection
-        self._test_connection()
-        
-        logger.info(f"Initialized local LLM generator with model '{model}'")
-    
-    def _test_connection(self) -> None:
-        """Test connection to local LLM API."""
-        try:
-            response = requests.get(
-                f"{self.base_url}/api/tags",
-                timeout=10
-            )
-            response.raise_for_status()
-            logger.info("Successfully connected to local LLM API")
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Could not connect to local LLM API: {str(e)}")
-    
+    """Local LLM generator backed by ModelManager (llama-cpp-python)."""
+
+    def __init__(self, model_manager=None, system_prompt: Optional[str] = None, **kwargs):
+        self._manager = model_manager
+        self.system_prompt = system_prompt or (
+            "You are a helpful AI assistant. Answer the user's question based on the provided context.\n"
+            "If the context doesn't contain enough information to fully answer the question, say so clearly.\n"
+            "Be accurate, concise, and helpful."
+        )
+
+    def set_model_manager(self, manager):
+        self._manager = manager
+
     def generate(
         self,
         query: str,
@@ -75,90 +29,52 @@ Be accurate, concise, and helpful.
         max_tokens: Optional[int] = None,
         **kwargs
     ) -> GenerationResult:
-        """Generate response using local LLM."""
-        start_time = datetime.now()
-        
-        # Use instance defaults if not provided
-        temperature = temperature or self.temperature
-        max_tokens = max_tokens or self.max_tokens
-        
-        try:
-            # Construct prompt
-            chat_history = kwargs.get('chat_history', [])
-            history_text = ""
-            if chat_history[-5:]: # Keep last 5 messages for context
-                history_text = "Previous Conversation:\n"
-                for msg in chat_history[-5:]:
-                    role_str = "User" if msg.get("role") == "user" else "Assistant"
-                    history_text += f"{role_str}: {msg.get('content')}\n"
-                history_text += "\n"
-                
-            prompt = f"{self.system_prompt}\n\n{history_text}Context:\n{context}\n\nQuestion: {query}\n\nAnswer:"
-            # Prepare request payload (Ollama format)
-            payload = {
-                "model": self.model,
-                "prompt": prompt,
-                "options": {
-                    "temperature": temperature,
-                    "num_predict": max_tokens,
-                    **kwargs
-                },
-                "stream": False
-            }
-            
-            # Make API call
-            response = requests.post(
-                f"{self.base_url}/api/generate",
-                json=payload,
-                timeout=self.timeout
-            )
-            response.raise_for_status()
-            
-            # Parse response
-            result = response.json()
-            generated_text = result.get("response", "")
-            
-            # Calculate generation time
-            generation_time = (datetime.now() - start_time).total_seconds()
-            
-            # Create metadata
-            metadata = {
-                "model": self.model,
-                "provider": "local",
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "generation_time": generation_time,
-                "eval_count": result.get("eval_count", 0),
-                "eval_duration": result.get("eval_duration", 0),
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            logger.debug(
-                f"Generated response ({result.get('eval_count', 0)} tokens) "
-                f"in {generation_time:.3f}s"
-            )
-            
-            return GenerationResult(
-                query=query,
-                response=generated_text.strip(),
-                context=context,
-                metadata=metadata
-            )
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error with local LLM API request: {str(e)}")
-            raise
-        except Exception as e:
-            logger.error(f"Error generating response with local LLM: {str(e)}")
-            raise
-    
-    def get_model_info(self) -> Dict[str, Any]:
-        """Get local LLM model information."""
-        return {
+        if not self._manager or not self._manager.is_loaded():
+            raise RuntimeError("No model loaded — select a model first")
+
+        start = datetime.now()
+
+        # Build prompt with optional chat history
+        chat_history = kwargs.get("chat_history", [])
+        history_block = ""
+        if chat_history:
+            recent = chat_history[-5:]
+            lines = []
+            for msg in recent:
+                role = "User" if msg.get("role") == "user" else "Assistant"
+                lines.append(f"{role}: {msg.get('content')}")
+            history_block = "Previous Conversation:\n" + "\n".join(lines) + "\n\n"
+
+        prompt = f"{self.system_prompt}\n\n{history_block}Context:\n{context}\n\nQuestion: {query}\n\nAnswer:"
+
+        result = self._manager.generate(
+            prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+        elapsed = (datetime.now() - start).total_seconds()
+        active = self._manager.get_active_model()
+
+        metadata = {
+            "model": active.get("name", "unknown"),
+            "model_id": active.get("id"),
             "provider": "local",
-            "model": self.model,
-            "base_url": self.base_url,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "type": "local_api"
+            "temperature": result.get("temperature"),
+            "generation_time": elapsed,
+            "prompt_tokens": result.get("prompt_tokens", 0),
+            "completion_tokens": result.get("completion_tokens", 0),
+            "timestamp": datetime.now().isoformat(),
         }
+
+        return GenerationResult(
+            query=query,
+            response=result["text"],
+            context=context,
+            metadata=metadata,
+        )
+
+    def get_model_info(self) -> Dict[str, Any]:
+        if self._manager:
+            return self._manager.get_active_model()
+        return {"provider": "local", "loaded": False}

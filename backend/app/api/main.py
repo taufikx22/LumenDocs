@@ -13,15 +13,15 @@ import uvicorn
 from app.config.loader import load_config
 from src.rag_system import RAGSystem
 from src.memory.sqlite_store import SQLiteStore
-from src.setup_manager import OllamaManager
+from src.model_manager import ModelManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="RAG System API",
-    description="Retrieval-Augmented Generation System API",
-    version="1.0.0",
+    title="LumenDocs API",
+    description="Local-first RAG System with GGUF model management",
+    version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -36,13 +36,14 @@ app.add_middleware(
 
 rag_system: Optional[RAGSystem] = None
 memory_store: Optional[SQLiteStore] = None
-ollama_manager: Optional[OllamaManager] = None
+model_manager: Optional[ModelManager] = None
 
+
+# ── request / response models ────────────────────────────────────
 
 class QueryRequest(BaseModel):
     question: str = Field(...)
     top_k: int = Field(5, ge=1, le=20)
-    model: Optional[str] = Field(None)
     session_id: Optional[str] = Field(None)
 
 class QueryResponse(BaseModel):
@@ -51,7 +52,8 @@ class QueryResponse(BaseModel):
     context: Optional[str] = None
     retrieval_metadata: Optional[Dict[str, Any]] = None
     generation_metadata: Optional[Dict[str, Any]] = None
-    model_type: Optional[str] = None
+    model_id: Optional[str] = None
+    model_name: Optional[str] = None
     retrieved_chunks: int = 0
     error: Optional[str] = None
 
@@ -65,35 +67,51 @@ class HealthResponse(BaseModel):
     status: str
     rag_system_ready: bool
     vector_store_status: str
+    model_loaded: bool
 
-class ModelInfo(BaseModel):
-    type: str
-    model: str
-    description: Optional[str] = None
-
-class MountRequest(BaseModel):
+class RegisterModelRequest(BaseModel):
+    name: str
     gguf_path: str
-    model_name: str = "custom-local-model"
 
+class ModelResponse(BaseModel):
+    id: str
+    name: str
+    gguf_path: str
+    file_size_bytes: Optional[int] = None
+    is_default: bool = False
+    registered_at: Optional[str] = None
+    last_used_at: Optional[str] = None
+
+
+# ── startup ───────────────────────────────────────────────────────
 
 @app.on_event("startup")
 async def startup_event():
-    global rag_system, memory_store, ollama_manager
+    global rag_system, memory_store, model_manager
     try:
         config = load_config()
-        logger.info("Initializing RAG system...")
-        rag_system = RAGSystem(config)
         memory_store = SQLiteStore()
+        model_manager = ModelManager(db_store=memory_store, config=config.get("generation", {}))
 
-        ollama_manager = OllamaManager()
-        if ollama_manager.is_installed():
-            ollama_manager.start()
+        logger.info("Initializing RAG system...")
+        rag_system = RAGSystem(config, model_manager=model_manager)
 
-        logger.info("RAG system ready")
+        # Auto-load default model if one is set
+        default = memory_store.get_default_model()
+        if default:
+            try:
+                model_manager.load_model(default["id"])
+                logger.info(f"Auto-loaded default model: {default['name']}")
+            except Exception as e:
+                logger.warning(f"Could not auto-load default model: {e}")
+
+        logger.info("System ready")
     except Exception as e:
         logger.error(f"Startup failed: {e}")
         raise
 
+
+# ── general endpoints ─────────────────────────────────────────────
 
 @app.get("/", include_in_schema=False)
 async def root():
@@ -101,27 +119,100 @@ async def root():
 
 @app.get("/healthz", response_model=HealthResponse)
 async def health_check():
-    global rag_system
+    global rag_system, model_manager
     if rag_system is None:
-        return HealthResponse(status="error", rag_system_ready=False, vector_store_status="not_initialized")
+        return HealthResponse(status="error", rag_system_ready=False, vector_store_status="not_initialized", model_loaded=False)
     try:
         rag_system.vector_store.get_collection_info()
         vs_status = "healthy"
     except Exception:
         vs_status = "unhealthy"
-    return HealthResponse(status="ok", rag_system_ready=True, vector_store_status=vs_status)
+    loaded = model_manager.is_loaded() if model_manager else False
+    return HealthResponse(status="ok", rag_system_ready=True, vector_store_status=vs_status, model_loaded=loaded)
 
+
+# ── model management ─────────────────────────────────────────────
+
+@app.get("/models")
+async def list_models():
+    global model_manager
+    if not model_manager:
+        raise HTTPException(status_code=503, detail="System not initialized")
+    return model_manager.list_models()
+
+@app.post("/models/register")
+async def register_model(request: RegisterModelRequest):
+    global model_manager
+    if not model_manager:
+        raise HTTPException(status_code=503, detail="System not initialized")
+    try:
+        result = model_manager.register_model(request.name, request.gguf_path)
+        return result
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/models/{model_id}")
+async def unregister_model(model_id: str):
+    global model_manager
+    if not model_manager:
+        raise HTTPException(status_code=503, detail="System not initialized")
+    model_manager.unregister_model(model_id)
+    return {"status": "removed"}
+
+@app.post("/models/{model_id}/load")
+async def load_model(model_id: str):
+    global model_manager
+    if not model_manager:
+        raise HTTPException(status_code=503, detail="System not initialized")
+    try:
+        return model_manager.load_model(model_id)
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/models/unload")
+async def unload_model():
+    global model_manager
+    if not model_manager:
+        raise HTTPException(status_code=503, detail="System not initialized")
+    model_manager.unload_model()
+    return {"status": "unloaded"}
+
+@app.get("/models/active")
+async def get_active_model():
+    global model_manager
+    if not model_manager:
+        raise HTTPException(status_code=503, detail="System not initialized")
+    return model_manager.get_active_model()
+
+@app.post("/models/{model_id}/default")
+async def set_default_model(model_id: str):
+    global model_manager
+    if not model_manager:
+        raise HTTPException(status_code=503, detail="System not initialized")
+    model_manager.set_default_model(model_id)
+    return {"status": "default_set"}
+
+
+# ── query ─────────────────────────────────────────────────────────
 
 @app.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
-    global rag_system, memory_store
+    global rag_system, memory_store, model_manager
     if rag_system is None or memory_store is None:
         raise HTTPException(status_code=503, detail="System not initialized")
+    if not model_manager or not model_manager.is_loaded():
+        raise HTTPException(status_code=400, detail="No model loaded — load a model first")
 
     session_id = request.session_id
+    active = model_manager.get_active_model()
+
     if session_id:
         title = request.question[:50] + ("..." if len(request.question) > 50 else "")
-        memory_store.create_session(session_id, title=title)
+        memory_store.create_session(session_id, title=title, model_id=active.get("id"))
         memory_store.add_message(session_id, "user", request.question)
 
     chat_history = memory_store.get_session_history(session_id) if session_id else []
@@ -130,16 +221,17 @@ async def query(request: QueryRequest):
         result = rag_system.query(
             request.question,
             top_k=request.top_k,
-            model_type=request.model,
             chat_history=chat_history,
         )
 
         if result.get("error"):
-            return QueryResponse(question=request.question, answer="", model_type=result.get("model_type"), error=result["answer"])
+            return QueryResponse(question=request.question, answer="", error=result["answer"])
 
         if session_id:
-            model_used = result.get("model_type") or request.model or "unknown"
-            memory_store.add_message(session_id, "assistant", result["answer"], model_used)
+            memory_store.add_message(
+                session_id, "assistant", result["answer"],
+                model_id=active.get("id"), model_name=active.get("name")
+            )
 
         return QueryResponse(
             question=result["question"],
@@ -147,7 +239,8 @@ async def query(request: QueryRequest):
             context=result.get("context"),
             retrieval_metadata=result.get("retrieval_metadata"),
             generation_metadata=result.get("generation_metadata"),
-            model_type=result.get("model_type"),
+            model_id=result.get("model_id"),
+            model_name=result.get("model_name"),
             retrieved_chunks=result.get("retrieved_chunks", 0),
         )
     except Exception as e:
@@ -155,18 +248,17 @@ async def query(request: QueryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── document ingestion ────────────────────────────────────────────
+
 @app.post("/ingest", response_model=IngestionResponse)
-async def ingest_documents(
-    files: List[UploadFile] = File(...),
-    background_tasks: BackgroundTasks = None
-):
+async def ingest_documents(files: List[UploadFile] = File(...)):
     global rag_system
     if rag_system is None:
         raise HTTPException(status_code=503, detail="RAG system not initialized")
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
-    allowed = {".pdf", ".docx", ".html", ".txt"}
+    allowed = {".pdf", ".docx", ".html", ".txt", ".pptx", ".ppt"}
     for file in files:
         ext = Path(file.filename).suffix.lower()
         if ext not in allowed:
@@ -198,40 +290,7 @@ async def ingest_documents(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/config")
-async def get_config():
-    try:
-        config = load_config()
-        safe = config.copy()
-        if "generation" in safe:
-            gen = safe["generation"].copy()
-            gen.pop("openai_api_key", None)
-            gen.pop("google_api_key", None)
-            safe["generation"] = gen
-        return safe
-    except Exception as e:
-        logger.error(f"Config error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to load configuration")
-
-
-@app.get("/models", response_model=List[ModelInfo])
-async def list_models():
-    try:
-        config = load_config()
-        models_cfg = config.get("generation", {}).get("models", []) or []
-        return [
-            ModelInfo(
-                type=str(e["type"]),
-                model=str(e["model"]),
-                description=str(e["description"]) if e.get("description") else None,
-            )
-            for e in models_cfg
-            if e.get("model") and e.get("type")
-        ]
-    except Exception as e:
-        logger.error(f"Models error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list models")
-
+# ── sessions ──────────────────────────────────────────────────────
 
 @app.get("/sessions")
 async def list_sessions():
@@ -248,32 +307,18 @@ async def get_session(session_id: str):
     return memory_store.get_session_history(session_id)
 
 
-@app.get("/setup/ollama/status")
-async def ollama_status():
-    global ollama_manager
-    if not ollama_manager:
-        raise HTTPException(status_code=503, detail="Manager not initialized")
-    return {"installed": ollama_manager.is_installed()}
+# ── config ────────────────────────────────────────────────────────
 
-@app.post("/setup/ollama/download")
-async def ollama_download():
-    global ollama_manager
-    if not ollama_manager:
-        raise HTTPException(status_code=503, detail="Manager not initialized")
-    if ollama_manager.download():
-        ollama_manager.start()
-        return {"status": "success"}
-    raise HTTPException(status_code=500, detail="Download failed")
+@app.get("/config")
+async def get_config():
+    try:
+        return load_config()
+    except Exception as e:
+        logger.error(f"Config error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load configuration")
 
-@app.post("/setup/model/mount")
-async def ollama_mount(request: MountRequest):
-    global ollama_manager
-    if not ollama_manager or not ollama_manager.is_installed():
-        raise HTTPException(status_code=400, detail="Ollama is not installed")
-    if ollama_manager.mount_gguf(request.gguf_path, request.model_name):
-        return {"status": "success"}
-    raise HTTPException(status_code=500, detail="Failed to mount model")
 
+# ── file browser (for model/document selection) ───────────────────
 
 @app.get("/setup/browse")
 async def browse_filesystem(path: str = ""):

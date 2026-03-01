@@ -1,14 +1,20 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useAutoResizeTextarea } from "@/hooks/use-auto-resize-textarea";
 import { LumenChatHeader } from "@/components/chat/LumenChatHeader";
 import { LumenChatMessages } from "@/components/chat/LumenChatMessages";
 import { LumenChatInput } from "@/components/chat/LumenChatInput";
 import type { ChatMessage } from "@/components/chat/types";
 import { LumenSidebar, type Session } from "@/components/chat/LumenSidebar";
+import { ModelLibrary } from "@/components/setup/ModelLibrary";
 import { Menu } from "lucide-react";
+
+interface ActiveModel {
+  loaded: boolean;
+  id?: string;
+  name?: string;
+}
 
 export default function RuixenMoonChat() {
   const [message, setMessage] = useState("");
@@ -17,16 +23,13 @@ export default function RuixenMoonChat() {
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selectedModel] = useState<string>("local");
+  const [activeModel, setActiveModel] = useState<ActiveModel | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [showModelLibrary, setShowModelLibrary] = useState(false);
 
-  const { textareaRef, adjustHeight } = useAutoResizeTextarea({
-    minHeight: 120,
-    maxHeight: 250,
-  });
-
+  const { textareaRef, adjustHeight } = useAutoResizeTextarea({ minHeight: 120, maxHeight: 250 });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -35,6 +38,18 @@ export default function RuixenMoonChat() {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
     }
   }, [messages.length]);
+
+  // Fetch active model on mount
+  const fetchActiveModel = useCallback(async () => {
+    try {
+      const res = await fetch("/api/rag/models/active");
+      if (res.ok) setActiveModel(await res.json());
+    } catch {
+      // quiet
+    }
+  }, []);
+
+  useEffect(() => { fetchActiveModel(); }, [fetchActiveModel]);
 
   const fetchSessions = async () => {
     try {
@@ -64,7 +79,8 @@ export default function RuixenMoonChat() {
         id: crypto.randomUUID(),
         role: msg.role,
         content: msg.content,
-        modelType: msg.model_type,
+        modelId: msg.model_id,
+        modelName: msg.model_name,
       })));
     } catch (err) {
       console.error(err);
@@ -78,6 +94,25 @@ export default function RuixenMoonChat() {
     setMessages([]);
     setIsSidebarOpen(false);
     setError(null);
+  };
+
+  const handleSwitchModel = async (modelId: string) => {
+    try {
+      const res = await fetch(`/api/rag/models/${modelId}/load`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to load model");
+      const data = await res.json();
+      setActiveModel(data);
+
+      // Add system message to chat
+      setMessages((prev) => [...prev, {
+        id: crypto.randomUUID(),
+        role: "system",
+        content: `Switched to ${data.name}`,
+      }]);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to switch model.");
+    }
   };
 
   const handleSend = async () => {
@@ -103,7 +138,6 @@ export default function RuixenMoonChat() {
         body: JSON.stringify({
           question: userMessage.content,
           top_k: 5,
-          model: selectedModel,
           session_id: currentSessionId,
         }),
       });
@@ -119,7 +153,8 @@ export default function RuixenMoonChat() {
         id: crypto.randomUUID(),
         role: "assistant",
         content: data.answer ?? "No answer returned.",
-        modelType: data.model_type ?? data.modelType ?? selectedModel,
+        modelId: data.model_id ?? null,
+        modelName: data.model_name ?? activeModel?.name ?? null,
         context: data.context ?? null,
       }]);
 
@@ -220,6 +255,11 @@ export default function RuixenMoonChat() {
               Next-generation document intelligence powered by <span className="bg-white text-sky-300 font-extrabold px-2.5 py-0.5 rounded-full mx-1 shadow-[0_0_15px_rgba(255,255,255,0.6)]">Local LLMs</span>.
               Instant citations, deep context, and complete privacy.
             </p>
+            {activeModel?.loaded && (
+              <p className="mt-3 text-xs text-neutral-400">
+                Active model: <span className="text-emerald-400 font-medium">{activeModel.name}</span>
+              </p>
+            )}
           </div>
 
           <div className="w-full max-w-3xl px-4 sm:px-6 animate-in fade-in slide-in-from-bottom-8 duration-1000">
@@ -245,11 +285,13 @@ export default function RuixenMoonChat() {
         <div className="flex-1 w-full flex flex-col items-center pt-24 pb-6 px-4 sm:px-6 animate-in fade-in zoom-in-95 duration-500">
           <div className="w-full max-w-5xl flex-1 relative bg-black/40 backdrop-blur-3xl rounded-[2rem] border border-white/10 flex flex-col shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden max-h-[85vh]">
             <LumenChatHeader
-              selectedModel={selectedModel}
+              activeModel={activeModel}
               isSending={isSending}
               uploadStatus={uploadStatus}
               messages={messages}
               onClear={handleNewSession}
+              onSwitchModel={handleSwitchModel}
+              onManageModels={() => setShowModelLibrary(true)}
             />
 
             <LumenChatMessages messages={messages} messagesEndRef={messagesEndRef} />
@@ -264,6 +306,13 @@ export default function RuixenMoonChat() {
           </div>
         </div>
       )}
+
+      <ModelLibrary
+        isOpen={showModelLibrary}
+        onClose={() => setShowModelLibrary(false)}
+        activeModelId={activeModel?.id}
+        onModelLoaded={fetchActiveModel}
+      />
     </div>
   );
 }

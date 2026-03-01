@@ -1,11 +1,10 @@
-export type ChatRole = "user" | "assistant";
+export type ChatRole = "user" | "assistant" | "system";
 
 export interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
-  modelType?: string | null;
+  modelId?: string | null;
+  modelName?: string | null;
   context?: string | null;
 }
-
-
