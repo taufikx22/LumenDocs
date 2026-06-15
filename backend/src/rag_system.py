@@ -4,7 +4,7 @@ from pathlib import Path
 
 from src.document_processing.factory import DocumentProcessorFactory
 from src.chunking.factory import ChunkerFactory
-from src.embedding.sentence_transformer import SentenceTransformerEmbedder
+from src.embedding.factory import EmbedderFactory
 from src.vector_store.factory import VectorStoreFactory
 from src.retrieval.factory import RetrieverFactory
 from src.generation.factory import GeneratorFactory
@@ -23,13 +23,8 @@ class RAGSystem:
         self.doc_processor = DocumentProcessorFactory()
         self.chunker_factory = ChunkerFactory(config.get('chunking', {}))
         
-        raw_embedding_config = dict(config.get('embedding', {}))
-        raw_embedding_config.setdefault('model_name', raw_embedding_config.pop('default_model', 'all-MiniLM-L6-v2'))
-
-        allowed_embedder_keys = {'model_name', 'batch_size', 'device', 'normalize_embeddings', 'show_progress'}
-        embedding_config = {k: v for k, v in raw_embedding_config.items() if k in allowed_embedder_keys}
-
-        self.embedder = SentenceTransformerEmbedder(**embedding_config)
+        embedder_factory = EmbedderFactory(config.get('embedding', {}))
+        self.embedder = embedder_factory.get_embedder()
         
         vector_store_factory = VectorStoreFactory(config.get('vector_store', {}))
         self.vector_store = vector_store_factory.get_default_store()

@@ -81,6 +81,24 @@ class ModelManager:
     # ── loading / unloading ───────────────────────────────────────
 
     def load_model(self, model_id: str) -> Dict[str, Any]:
+        model_info = self._db.get_model(model_id) if self._db else None
+        if not model_info:
+            raise ValueError(f"Model '{model_id}' not found in registry")
+
+        gguf_path = model_info["gguf_path"]
+        
+        # Intercept cloud model loading
+        if gguf_path.startswith("openai://") or gguf_path.startswith("gemini://") or gguf_path.startswith("claude://"):
+            self.unload_model()
+            self._active_model_id = model_id
+            self._active_model_name = model_info["name"]
+            
+            if self._db:
+                self._db.touch_model_used(model_id)
+                
+            logger.info(f"Loaded cloud model: {model_info['name']}")
+            return self.get_active_model()
+
         if not _llama_available:
             raise RuntimeError("llama-cpp-python is not installed")
 
@@ -90,11 +108,6 @@ class ModelManager:
         # Unload existing model first
         self.unload_model()
 
-        model_info = self._db.get_model(model_id) if self._db else None
-        if not model_info:
-            raise ValueError(f"Model '{model_id}' not found in registry")
-
-        gguf_path = model_info["gguf_path"]
         if not Path(gguf_path).exists():
             raise FileNotFoundError(f"GGUF file missing: {gguf_path}")
 
@@ -131,8 +144,21 @@ class ModelManager:
             self._active_model_id = None
             self._active_model_name = None
             logger.info(f"Unloaded model '{name}'")
+        else:
+            self._active_model_id = None
+            self._active_model_name = None
 
     def get_active_model(self) -> Dict[str, Any]:
+        if self._active_model_id:
+            # Check if active is cloud
+            model_info = self._db.get_model(self._active_model_id) if self._db else None
+            if model_info and (model_info["gguf_path"].startswith("openai://") or model_info["gguf_path"].startswith("gemini://") or model_info["gguf_path"].startswith("claude://")):
+                return {
+                    "loaded": True,
+                    "id": self._active_model_id,
+                    "name": self._active_model_name,
+                    "context_size": self._default_ctx,
+                }
         if self._model is None:
             return {"loaded": False}
         return {
@@ -143,6 +169,10 @@ class ModelManager:
         }
 
     def is_loaded(self) -> bool:
+        if self._active_model_id:
+            model_info = self._db.get_model(self._active_model_id) if self._db else None
+            if model_info and (model_info["gguf_path"].startswith("openai://") or model_info["gguf_path"].startswith("gemini://") or model_info["gguf_path"].startswith("claude://")):
+                return True
         return self._model is not None
 
     # ── generation ────────────────────────────────────────────────
@@ -154,6 +184,21 @@ class ModelManager:
         max_tokens: Optional[int] = None,
         stop: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
+        # Route cloud generation first
+        if self._active_model_id:
+            model_info = self._db.get_model(self._active_model_id) if self._db else None
+            if model_info:
+                gguf_path = model_info["gguf_path"]
+                if gguf_path.startswith("openai://"):
+                    model_name = gguf_path.replace("openai://", "")
+                    return self._generate_openai(prompt, model_name, temperature, max_tokens, stop)
+                elif gguf_path.startswith("gemini://"):
+                    model_name = gguf_path.replace("gemini://", "")
+                    return self._generate_gemini(prompt, model_name, temperature, max_tokens, stop)
+                elif gguf_path.startswith("claude://"):
+                    model_name = gguf_path.replace("claude://", "")
+                    return self._generate_claude(prompt, model_name, temperature, max_tokens, stop)
+
         if self._model is None:
             raise RuntimeError("No model loaded")
 
@@ -178,4 +223,159 @@ class ModelManager:
             "prompt_tokens": usage.get("prompt_tokens", 0),
             "completion_tokens": usage.get("completion_tokens", 0),
             "temperature": temp,
+        }
+
+    def _generate_openai(
+        self,
+        prompt: str,
+        model_name: str,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        stop: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        api_key = self._config.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OpenAI API key not configured")
+
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        
+        if not model_name:
+            model_name = "gpt-4o"
+            
+        messages = [{"role": "user", "content": prompt}]
+        
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            temperature=temperature if temperature is not None else self._default_temp,
+            max_tokens=max_tokens if max_tokens is not None else self._default_max_tokens,
+            stop=stop,
+        )
+        
+        text = response.choices[0].message.content or ""
+        prompt_tokens = response.usage.prompt_tokens if response.usage else 0
+        completion_tokens = response.usage.completion_tokens if response.usage else 0
+        
+        return {
+            "text": text.strip(),
+            "model_name": f"OpenAI {model_name}",
+            "model_id": self._active_model_id,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "temperature": temperature if temperature is not None else self._default_temp,
+        }
+
+    def _generate_gemini(
+        self,
+        prompt: str,
+        model_name: str,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        stop: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        api_key = self._config.get("google_api_key") or os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("Google API key not configured")
+
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        
+        if not model_name:
+            model_name = "gemini-1.5-flash"
+            
+        generation_config = {}
+        generation_config["temperature"] = temperature if temperature is not None else self._default_temp
+        generation_config["max_output_tokens"] = max_tokens if max_tokens is not None else self._default_max_tokens
+        if stop:
+            generation_config["stop_sequences"] = stop
+            
+        model = genai.GenerativeModel(
+            model_name=model_name,
+            generation_config=generation_config
+        )
+        
+        response = model.generate_content(prompt)
+        text = response.text or ""
+        
+        prompt_tokens = 0
+        completion_tokens = 0
+        try:
+            if hasattr(response, "usage_metadata"):
+                prompt_tokens = response.usage_metadata.prompt_token_count
+                completion_tokens = response.usage_metadata.candidates_token_count
+        except Exception:
+            pass
+            
+        return {
+            "text": text.strip(),
+            "model_name": f"Gemini {model_name}",
+            "model_id": self._active_model_id,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "temperature": generation_config["temperature"],
+        }
+
+    def _generate_claude(
+        self,
+        prompt: str,
+        model_name: str,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        stop: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        api_key = self._config.get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("Anthropic API key not configured")
+
+        import httpx
+        
+        if not model_name:
+            model_name = "claude-3-5-sonnet-20241022"
+            
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        
+        payload = {
+            "model": model_name,
+            "max_tokens": max_tokens if max_tokens is not None else self._default_max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        
+        if temperature is not None:
+            payload["temperature"] = max(0.0, min(1.0, temperature))
+            
+        if stop:
+            payload["stop_sequences"] = stop
+            
+        with httpx.Client() as client:
+            response = client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers=headers,
+                json=payload,
+                timeout=60.0
+            )
+            
+        if response.status_code != 200:
+            raise RuntimeError(f"Anthropic API error: {response.text}")
+            
+        res_data = response.json()
+        text = ""
+        if res_data.get("content"):
+            text = res_data["content"][0].get("text", "")
+            
+        usage = res_data.get("usage", {})
+        prompt_tokens = usage.get("input_tokens", 0)
+        completion_tokens = usage.get("output_tokens", 0)
+        
+        return {
+            "text": text.strip(),
+            "model_name": f"Claude {model_name}",
+            "model_id": self._active_model_id,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "temperature": payload.get("temperature", self._default_temp),
         }
