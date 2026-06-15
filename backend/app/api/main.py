@@ -28,8 +28,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -104,6 +104,49 @@ async def startup_event():
                 logger.info(f"Auto-loaded default model: {default['name']}")
             except Exception as e:
                 logger.warning(f"Could not auto-load default model: {e}")
+
+        # Auto-register Cloud Models if API keys exist in config/env
+        openai_key = config.get("generation", {}).get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+        google_key = config.get("generation", {}).get("google_api_key") or os.getenv("GOOGLE_API_KEY")
+        anthropic_key = config.get("generation", {}).get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")
+
+        if openai_key:
+            try:
+                models = memory_store.list_models()
+                registered_ids = {m["id"] for m in models}
+                if "openai-gpt-4o" not in registered_ids:
+                    memory_store.register_model("openai-gpt-4o", "OpenAI GPT-4o", "openai://gpt-4o", 0)
+                if "openai-gpt-4o-mini" not in registered_ids:
+                    memory_store.register_model("openai-gpt-4o-mini", "OpenAI GPT-4o Mini", "openai://gpt-4o-mini", 0)
+                logger.info("Registered OpenAI Cloud models in DB")
+            except Exception as e:
+                logger.warning(f"Could not auto-register OpenAI models: {e}")
+
+        if google_key:
+            try:
+                models = memory_store.list_models()
+                registered_ids = {m["id"] for m in models}
+                if "gemini-1.5-flash" not in registered_ids:
+                    memory_store.register_model("gemini-1.5-flash", "Gemini 1.5 Flash", "gemini://gemini-1.5-flash", 0)
+                if "gemini-2.5-flash" not in registered_ids:
+                    memory_store.register_model("gemini-2.5-flash", "Gemini 2.5 Flash", "gemini://gemini-2.5-flash", 0)
+                if "gemini-1.5-pro" not in registered_ids:
+                    memory_store.register_model("gemini-1.5-pro", "Gemini 1.5 Pro", "gemini://gemini-1.5-pro", 0)
+                logger.info("Registered Gemini Cloud models in DB")
+            except Exception as e:
+                logger.warning(f"Could not auto-register Gemini models: {e}")
+
+        if anthropic_key:
+            try:
+                models = memory_store.list_models()
+                registered_ids = {m["id"] for m in models}
+                if "claude-3-5-sonnet" not in registered_ids:
+                    memory_store.register_model("claude-3-5-sonnet", "Claude 3.5 Sonnet", "claude://claude-3-5-sonnet-20241022", 0)
+                if "claude-3-5-haiku" not in registered_ids:
+                    memory_store.register_model("claude-3-5-haiku", "Claude 3.5 Haiku", "claude://claude-3-5-haiku-20241022", 0)
+                logger.info("Registered Claude Cloud models in DB")
+            except Exception as e:
+                logger.warning(f"Could not auto-register Claude models: {e}")
 
         logger.info("System ready")
     except Exception as e:
@@ -360,4 +403,6 @@ async def browse_filesystem(path: str = ""):
 
 
 if __name__ == "__main__":
-    uvicorn.run("app.api.main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    host = os.getenv("RAG_API_HOST", "127.0.0.1")
+    port = int(os.getenv("RAG_API_PORT", "8000"))
+    uvicorn.run("app.api.main:app", host=host, port=port, reload=True, log_level="info")

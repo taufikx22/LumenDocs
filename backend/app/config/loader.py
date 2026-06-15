@@ -51,6 +51,8 @@ def _apply_env_overrides(config: Dict[str, Any]) -> Dict[str, Any]:
         generation["openai_api_key"] = os.getenv("OPENAI_API_KEY")
     if os.getenv("GOOGLE_API_KEY"):
         generation["google_api_key"] = os.getenv("GOOGLE_API_KEY")
+    if os.getenv("ANTHROPIC_API_KEY"):
+        generation["anthropic_api_key"] = os.getenv("ANTHROPIC_API_KEY")
     if os.getenv("GENERATION_DEFAULT_MODEL"):
         generation["default_model"] = os.getenv("GENERATION_DEFAULT_MODEL")
     if os.getenv("GENERATION_DEFAULT_TYPE"):
