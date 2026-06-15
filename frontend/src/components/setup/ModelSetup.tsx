@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { Loader2, HardDriveUpload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FileBrowser } from "@/components/setup/FileBrowser";
+import { getApiUrl } from "@/lib/api";
 
 export function ModelSetup({ onComplete }: { onComplete: () => void }) {
     const [checking, setChecking] = useState(true);
@@ -15,22 +16,22 @@ export function ModelSetup({ onComplete }: { onComplete: () => void }) {
         const check = async () => {
             try {
                 // Check if backend is up and if any models are already registered
-                const healthRes = await fetch("/api/rag/healthz");
+                const healthRes = await fetch(getApiUrl("/healthz"));
                 if (!healthRes.ok) { setTimeout(check, 2000); return; }
 
-                const modelsRes = await fetch("/api/rag/models");
+                const modelsRes = await fetch(getApiUrl("/models"));
                 if (modelsRes.ok) {
                     const models = await modelsRes.json();
                     if (models.length > 0) {
                         // Models already registered — check if one is loaded
-                        const activeRes = await fetch("/api/rag/models/active");
+                        const activeRes = await fetch(getApiUrl("/models/active"));
                         if (activeRes.ok) {
                             const active = await activeRes.json();
                             if (active.loaded) { onComplete(); return; }
                         }
                         // Load the default or first model
                         const target = models.find((m: { is_default: boolean }) => m.is_default) || models[0];
-                        await fetch(`/api/rag/models/${target.id}/load`, { method: "POST" });
+                        await fetch(getApiUrl(`/models/${target.id}/load`), { method: "POST" });
                         onComplete();
                         return;
                     }
@@ -53,7 +54,7 @@ export function ModelSetup({ onComplete }: { onComplete: () => void }) {
         const name = filename.replace(/\.gguf$/i, "").replace(/[_-]/g, " ");
 
         try {
-            const regRes = await fetch("/api/rag/models/register", {
+            const regRes = await fetch(getApiUrl("/models/register"), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name, gguf_path: filePath }),
@@ -62,8 +63,8 @@ export function ModelSetup({ onComplete }: { onComplete: () => void }) {
             const model = await regRes.json();
 
             // Set as default and load
-            await fetch(`/api/rag/models/${model.id}/default`, { method: "POST" });
-            const loadRes = await fetch(`/api/rag/models/${model.id}/load`, { method: "POST" });
+            await fetch(getApiUrl(`/models/${model.id}/default`), { method: "POST" });
+            const loadRes = await fetch(getApiUrl(`/models/${model.id}/load`), { method: "POST" });
             if (!loadRes.ok) throw new Error("Failed to load model");
 
             onComplete();

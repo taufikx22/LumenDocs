@@ -1,5 +1,4 @@
 import { ChatMessage } from "@/components/chat/types";
-import { ModelSelector } from "@/components/chat/ModelSelector";
 import { Button } from "@/components/ui/button";
 
 interface ActiveModel {
@@ -25,13 +24,12 @@ export function LumenChatHeader({
   return (
     <div className="px-6 py-3 border-b border-white/5 flex items-center justify-between text-[11px] text-neutral-400 font-medium tracking-tight">
       <div className="flex items-center gap-4">
-        <ModelSelector
-          activeModel={activeModel}
-          onSwitch={onSwitchModel}
-          onManageModels={onManageModels}
-        />
+        <span className="flex items-center gap-2 text-neutral-300">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Model: <strong className="text-white font-semibold">{activeModel?.loaded ? activeModel.name : "None"}</strong></span>
+        </span>
         {isSending && (
-          <span className="flex items-center gap-2 text-blue-400">
+          <span className="flex items-center gap-2 text-blue-400 ml-2">
             <span className="animate-bounce">●</span>
             Thinking…
           </span>

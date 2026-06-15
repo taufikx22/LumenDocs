@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Folder, FileText, ArrowLeft, HardDrive, X, Loader2, Search } from "lucide-react";
+import { getApiUrl } from "@/lib/api";
 
 interface FileItem {
     name: string;
@@ -41,8 +42,8 @@ export function FileBrowser({ onSelect, onCancel, filterExtensions = [".gguf"] }
         setSearchQuery("");
         try {
             const url = path
-                ? `/api/rag/browse?path=${encodeURIComponent(path)}`
-                : "/api/rag/browse";
+                ? getApiUrl(`/browse?path=${encodeURIComponent(path)}`)
+                : getApiUrl("/browse");
             const res = await fetch(url);
             if (!res.ok) {
                 const detail = await res.json().catch(() => ({ detail: "Failed to browse" }));

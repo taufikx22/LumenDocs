@@ -8,7 +8,9 @@ import { LumenChatInput } from "@/components/chat/LumenChatInput";
 import type { ChatMessage } from "@/components/chat/types";
 import { LumenSidebar, type Session } from "@/components/chat/LumenSidebar";
 import { ModelLibrary } from "@/components/setup/ModelLibrary";
+import { ModelSelector } from "@/components/chat/ModelSelector";
 import { Menu } from "lucide-react";
+import { getApiUrl } from "@/lib/api";
 
 interface ActiveModel {
   loaded: boolean;
@@ -42,7 +44,7 @@ export default function RuixenMoonChat() {
   // Fetch active model on mount
   const fetchActiveModel = useCallback(async () => {
     try {
-      const res = await fetch("/api/rag/models/active");
+      const res = await fetch(getApiUrl("/models/active"));
       if (res.ok) setActiveModel(await res.json());
     } catch {
       // quiet
@@ -53,7 +55,7 @@ export default function RuixenMoonChat() {
 
   const fetchSessions = async () => {
     try {
-      const res = await fetch("/api/rag/sessions");
+      const res = await fetch(getApiUrl("/sessions"));
       if (res.ok) setSessions(await res.json());
     } catch (err) {
       console.error("Failed to fetch sessions", err);
@@ -70,7 +72,7 @@ export default function RuixenMoonChat() {
     setMessages([]);
 
     try {
-      const res = await fetch(`/api/rag/sessions/${id}`);
+      const res = await fetch(getApiUrl(`/sessions/${id}`));
       if (!res.ok) throw new Error("Failed to load session");
       const data = await res.json();
 
@@ -98,7 +100,7 @@ export default function RuixenMoonChat() {
 
   const handleSwitchModel = async (modelId: string) => {
     try {
-      const res = await fetch(`/api/rag/models/${modelId}/load`, { method: "POST" });
+      const res = await fetch(getApiUrl(`/models/${modelId}/load`), { method: "POST" });
       if (!res.ok) throw new Error("Failed to load model");
       const data = await res.json();
       setActiveModel(data);
@@ -132,7 +134,7 @@ export default function RuixenMoonChat() {
     adjustHeight(true);
 
     try {
-      const response = await fetch("/api/rag/query", {
+      const response = await fetch(getApiUrl("/query"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -188,7 +190,7 @@ export default function RuixenMoonChat() {
     Array.from(files).forEach((file) => formData.append("files", file));
 
     try {
-      const response = await fetch("/api/rag/ingest", { method: "POST", body: formData });
+      const response = await fetch(getApiUrl("/ingest"), { method: "POST", body: formData });
       const data = await response.json();
 
       if (!response.ok) {
@@ -243,6 +245,14 @@ export default function RuixenMoonChat() {
         >
           <Menu size={22} className="group-hover:scale-110 transition-transform" />
         </button>
+      </div>
+
+      <div className="absolute top-6 right-6 z-30">
+        <ModelSelector
+          activeModel={activeModel}
+          onSwitch={handleSwitchModel}
+          onManageModels={() => setShowModelLibrary(true)}
+        />
       </div>
 
       {messages.length === 0 ? (

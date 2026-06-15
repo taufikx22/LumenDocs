@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { X, Trash2, Star, Plus, HardDrive, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FileBrowser } from "@/components/setup/FileBrowser";
+import { getApiUrl } from "@/lib/api";
 
 interface Model {
     id: string;
@@ -31,7 +32,7 @@ export function ModelLibrary({ isOpen, onClose, activeModelId, onModelLoaded }: 
 
     const fetchModels = useCallback(async () => {
         try {
-            const res = await fetch("/api/rag/models");
+            const res = await fetch(getApiUrl("/models"));
             if (res.ok) setModels(await res.json());
         } catch {
             // quiet
@@ -53,7 +54,7 @@ export function ModelLibrary({ isOpen, onClose, activeModelId, onModelLoaded }: 
         const name = filename.replace(/\.gguf$/i, "").replace(/[_-]/g, " ");
 
         try {
-            const res = await fetch("/api/rag/models/register", {
+            const res = await fetch(getApiUrl("/models/register"), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name, gguf_path: filePath }),
@@ -73,7 +74,7 @@ export function ModelLibrary({ isOpen, onClose, activeModelId, onModelLoaded }: 
 
     const handleRemove = async (id: string) => {
         try {
-            await fetch(`/api/rag/models/${id}`, { method: "DELETE" });
+            await fetch(getApiUrl(`/models/${id}`), { method: "DELETE" });
             await fetchModels();
         } catch {
             setError("Failed to remove model");
@@ -82,7 +83,7 @@ export function ModelLibrary({ isOpen, onClose, activeModelId, onModelLoaded }: 
 
     const handleSetDefault = async (id: string) => {
         try {
-            await fetch(`/api/rag/models/${id}/default`, { method: "POST" });
+            await fetch(getApiUrl(`/models/${id}/default`), { method: "POST" });
             await fetchModels();
         } catch {
             setError("Failed to set default");

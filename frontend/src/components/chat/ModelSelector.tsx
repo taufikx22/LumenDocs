@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ChevronDown, Cpu, Loader2, Check } from "lucide-react";
+import { getApiUrl } from "@/lib/api";
 
 interface Model {
     id: string;
@@ -33,7 +34,7 @@ export function ModelSelector({ activeModel, onSwitch, onManageModels }: ModelSe
 
     useEffect(() => {
         if (open) {
-            fetch("/api/rag/models")
+            fetch(getApiUrl("/models"))
                 .then((r) => r.json())
                 .then(setModels)
                 .catch(() => { });
