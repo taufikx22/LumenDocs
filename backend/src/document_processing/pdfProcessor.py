@@ -39,7 +39,7 @@ class PDFProcessor(DocumentProcessor):
                             key = key[1:]
                             metadata[key] = value
 
-                doc_id = hashlib.md5(file_path.name+ content.encode()).hexdigest()
+                doc_id = hashlib.md5((file_path.name + content).encode('utf-8', errors='ignore')).hexdigest()
                 metadata['doc_id'] = doc_id
                 return {
                     'content': content,

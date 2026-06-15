@@ -9,13 +9,12 @@ import hashlib
 from src.document_processing.base import DocumentProcessor
 
 class HTMLProcessor(DocumentProcessor):
-    def __init__(self, file_path: str):
+    def __init__(self):
         self.html_converter = html2text.HTML2Text()
         self.html_converter.ignore_links = False
         self.html_converter.ignore_images = True
         self.html_converter.ignore_tables = False
         self.html_converter.body_width = 0
-        self.file_path = Path(file_path)
 
     def process(self, file_path: Path) -> Dict[str, Any]:
         if not file_path.exists():

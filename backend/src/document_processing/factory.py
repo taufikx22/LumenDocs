@@ -2,10 +2,11 @@ from pathlib import Path
 from typing import Dict, Type
 import logging
 
-from src.document_processing.base import DocumentProcessor
+from src.document_processing.base import DocumentProcessor, Document
 from src.document_processing.pdfProcessor import PDFProcessor
 from src.document_processing.docxProcessor import DocxProcessor
 from src.document_processing.htmlProcessor import HTMLProcessor
+from src.document_processing.txtProcessor import TXTProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -14,41 +15,32 @@ class DocumentProcessorFactory:
         self._processors: Dict[str, Type[DocumentProcessor]] = {
             'pdf': PDFProcessor,
             'docx': DocxProcessor,
-            'html': HTMLProcessor
+            'html': HTMLProcessor,
+            'txt': TXTProcessor
         }
 
     def get_supported_extensions(self) -> list:
         return list(self._processors.keys())
     
-    def get_processor(self, file_path: Path) -> DocumentProcessor:
+    def get_processor(self, file_path: Path) -> Type[DocumentProcessor]:
         ext = file_path.suffix.lower().lstrip('.')
         processor_class = self._processors.get(ext)
 
         if processor_class is None:
             logger.error(f"No processor found for file extension: {ext}")
             raise ValueError(f"No processor found for file extension: {ext}")
+        return processor_class
             
-    def process_file(self, file_path: Path) -> DocumentProcessor:
-        processor = self.get_processor(file_path)
-        if processor:
-            return processor(file_path)
-        else:
-            logger.error(f"Failed to create processor for file: {file_path}")
-            raise ValueError(f"Failed to create processor for file: {file_path}")
-        
+    def process_document(self, file_path: Path) -> Document:
+        processor_class = self.get_processor(file_path)
+        processor = processor_class()
         try:
-            result = processor.process(filr_path)
+            result = processor.process(file_path)
             return Document(
-                content= result,
-                doc_id= result.get('doc_id', None),
-                metadata={
-                    'file_name': file_path.name,
-                    'file_extension': file_path.suffix
-                }
+                content=result['content'],
+                metadata=result['metadata'],
+                doc_id=result.get('doc_id')
             )
         except Exception as e:
             logger.error(f"Error processing file {file_path}: {e}")
             raise RuntimeError(f"Error processing file {file_path}: {e}") from e
-        
-        return processor_class(file_path)   
-    
