@@ -44,7 +44,7 @@ class RecursiveChunker(BaseChunker):
             ", "
         ]
         
-    def _estimate_token_count(self, text: str) -> int:\
+    def _estimate_token_count(self, text: str) -> int:
         return len(text.split())
     
     def _split_text(self, text: str, separator: str) -> List[str]:
