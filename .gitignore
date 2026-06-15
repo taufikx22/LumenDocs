@@ -1,0 +1,52 @@
+# Dependencies
+**/node_modules/
+**/.pnp
+.pnp.*
+
+# Virtual environments
+**/venv/
+**/.venv/
+**/ENV/
+**/env/
+
+# Python cache & build
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/build/
+**/dist/
+**/*.egg-info/
+
+# Next.js build & static export
+**/.next/
+**/out/
+
+# Local databases and runtime data
+**/backend/data/
+**/backend/logs/
+**/*.log
+**/*.db
+**/*.db-wal
+**/*.db-shm
+
+# Environment secrets
+**/.env
+**/.env.local
+**/.env.production
+**/.env.development
+**/.env.staging
+**/.env.test
+
+# IDE & Editor files
+**/.vscode/
+**/.idea/
+**/*.suo
+**/*.ntvs*
+**/*.njsproj
+**/*.sln
+**/*.swp
+**/*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

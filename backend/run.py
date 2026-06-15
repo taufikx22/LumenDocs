@@ -11,9 +11,11 @@ if __name__ == "__main__":
     # Load configuration
     config = load_config()
     
+    import os
+    
     # Get server configuration
-    host = "0.0.0.0"
-    port = 8000
+    host = os.getenv("RAG_API_HOST", "127.0.0.1")
+    port = int(os.getenv("RAG_API_PORT", "8000"))
     log_level = "info"
     
     print(f"Starting RAG System API server...")
