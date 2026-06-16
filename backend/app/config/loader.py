@@ -115,3 +115,42 @@ def get_config_value(config: Dict[str, Any], key_path: str, default: Any = None)
             return default
     
     return current
+
+
+def save_config(updates: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Merge updates into the YAML config file and save.
+    Only updates keys present in `updates`, preserving everything else.
+    
+    Args:
+        updates: Partial config dictionary with updated values
+        
+    Returns:
+        The full merged configuration
+    """
+    config_path = Path(__file__).parent / "config.yaml"
+    
+    # Load existing
+    if config_path.exists():
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+    else:
+        config = {}
+    
+    # Deep merge updates into config
+    _deep_merge(config, updates)
+    
+    # Write back
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    
+    return config
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]):
+    """Recursively merge override into base dict (in-place)."""
+    for key, value in override.items():
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value

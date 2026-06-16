@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
-from app.config.loader import load_config
+from app.config.loader import load_config, save_config
 from src.rag_system import RAGSystem
 from src.memory.sqlite_store import SQLiteStore
 from src.model_manager import ModelManager
@@ -73,6 +73,20 @@ class RegisterModelRequest(BaseModel):
     name: str
     gguf_path: str
 
+class SettingsRequest(BaseModel):
+    openai_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    system_prompt: Optional[str] = None
+    user_instructions: Optional[str] = None
+    default_temperature: Optional[float] = None
+    default_max_tokens: Optional[int] = None
+    default_context_size: Optional[int] = None
+
+class TestKeyRequest(BaseModel):
+    provider: str  # 'openai', 'google', 'anthropic'
+    api_key: str
+
 class ModelResponse(BaseModel):
     id: str
     name: str
@@ -106,47 +120,7 @@ async def startup_event():
                 logger.warning(f"Could not auto-load default model: {e}")
 
         # Auto-register Cloud Models if API keys exist in config/env
-        openai_key = config.get("generation", {}).get("openai_api_key") or os.getenv("OPENAI_API_KEY")
-        google_key = config.get("generation", {}).get("google_api_key") or os.getenv("GOOGLE_API_KEY")
-        anthropic_key = config.get("generation", {}).get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")
-
-        if openai_key:
-            try:
-                models = memory_store.list_models()
-                registered_ids = {m["id"] for m in models}
-                if "openai-gpt-4o" not in registered_ids:
-                    memory_store.register_model("openai-gpt-4o", "OpenAI GPT-4o", "openai://gpt-4o", 0)
-                if "openai-gpt-4o-mini" not in registered_ids:
-                    memory_store.register_model("openai-gpt-4o-mini", "OpenAI GPT-4o Mini", "openai://gpt-4o-mini", 0)
-                logger.info("Registered OpenAI Cloud models in DB")
-            except Exception as e:
-                logger.warning(f"Could not auto-register OpenAI models: {e}")
-
-        if google_key:
-            try:
-                models = memory_store.list_models()
-                registered_ids = {m["id"] for m in models}
-                if "gemini-1.5-flash" not in registered_ids:
-                    memory_store.register_model("gemini-1.5-flash", "Gemini 1.5 Flash", "gemini://gemini-1.5-flash", 0)
-                if "gemini-2.5-flash" not in registered_ids:
-                    memory_store.register_model("gemini-2.5-flash", "Gemini 2.5 Flash", "gemini://gemini-2.5-flash", 0)
-                if "gemini-1.5-pro" not in registered_ids:
-                    memory_store.register_model("gemini-1.5-pro", "Gemini 1.5 Pro", "gemini://gemini-1.5-pro", 0)
-                logger.info("Registered Gemini Cloud models in DB")
-            except Exception as e:
-                logger.warning(f"Could not auto-register Gemini models: {e}")
-
-        if anthropic_key:
-            try:
-                models = memory_store.list_models()
-                registered_ids = {m["id"] for m in models}
-                if "claude-3-5-sonnet" not in registered_ids:
-                    memory_store.register_model("claude-3-5-sonnet", "Claude 3.5 Sonnet", "claude://claude-3-5-sonnet-20241022", 0)
-                if "claude-3-5-haiku" not in registered_ids:
-                    memory_store.register_model("claude-3-5-haiku", "Claude 3.5 Haiku", "claude://claude-3-5-haiku-20241022", 0)
-                logger.info("Registered Claude Cloud models in DB")
-            except Exception as e:
-                logger.warning(f"Could not auto-register Claude models: {e}")
+        _register_cloud_models_if_needed(config)
 
         logger.info("System ready")
     except Exception as e:
@@ -400,6 +374,158 @@ async def browse_filesystem(path: str = ""):
     except Exception as e:
         logger.error(f"Browse error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── settings ──────────────────────────────────────────────────────
+
+def _mask_key(key: Optional[str]) -> Optional[str]:
+    """Return masked version of API key for display."""
+    if not key or len(key) < 8:
+        return None
+    return key[:4] + "*" * (len(key) - 8) + key[-4:]
+
+@app.get("/settings")
+async def get_settings():
+    try:
+        config = load_config()
+        gen = config.get("generation", {})
+        return {
+            "openai_api_key": _mask_key(gen.get("openai_api_key") or os.getenv("OPENAI_API_KEY")),
+            "google_api_key": _mask_key(gen.get("google_api_key") or os.getenv("GOOGLE_API_KEY")),
+            "anthropic_api_key": _mask_key(gen.get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")),
+            "openai_configured": bool(gen.get("openai_api_key") or os.getenv("OPENAI_API_KEY")),
+            "google_configured": bool(gen.get("google_api_key") or os.getenv("GOOGLE_API_KEY")),
+            "anthropic_configured": bool(gen.get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")),
+            "system_prompt": gen.get("system_prompt", ""),
+            "user_instructions": gen.get("user_instructions", ""),
+            "default_temperature": gen.get("default_temperature", 0.2),
+            "default_max_tokens": gen.get("default_max_tokens", 1024),
+            "default_context_size": gen.get("default_context_size", 4096),
+        }
+    except Exception as e:
+        logger.error(f"Settings error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load settings")
+
+@app.put("/settings")
+async def update_settings(request: SettingsRequest):
+    global model_manager, memory_store
+    try:
+        updates: Dict[str, Any] = {"generation": {}}
+        gen = updates["generation"]
+
+        if request.openai_api_key is not None:
+            gen["openai_api_key"] = request.openai_api_key
+            os.environ["OPENAI_API_KEY"] = request.openai_api_key
+        if request.google_api_key is not None:
+            gen["google_api_key"] = request.google_api_key
+            os.environ["GOOGLE_API_KEY"] = request.google_api_key
+        if request.anthropic_api_key is not None:
+            gen["anthropic_api_key"] = request.anthropic_api_key
+            os.environ["ANTHROPIC_API_KEY"] = request.anthropic_api_key
+        if request.system_prompt is not None:
+            gen["system_prompt"] = request.system_prompt
+        if request.user_instructions is not None:
+            gen["user_instructions"] = request.user_instructions
+        if request.default_temperature is not None:
+            gen["default_temperature"] = request.default_temperature
+        if request.default_max_tokens is not None:
+            gen["default_max_tokens"] = request.default_max_tokens
+        if request.default_context_size is not None:
+            gen["default_context_size"] = request.default_context_size
+
+        # Only save non-empty updates
+        if gen:
+            save_config(updates)
+
+        # Reload config into model_manager
+        config = load_config()
+        if model_manager:
+            model_manager._config = config.get("generation", {})
+            if request.default_temperature is not None:
+                model_manager._default_temp = request.default_temperature
+            if request.default_max_tokens is not None:
+                model_manager._default_max_tokens = request.default_max_tokens
+            if request.default_context_size is not None:
+                model_manager._default_ctx = request.default_context_size
+
+        # Re-register cloud models if new keys were provided
+        if memory_store:
+            _register_cloud_models_if_needed(config)
+
+        logger.info("Settings updated successfully")
+        return {"status": "ok", "message": "Settings saved"}
+    except Exception as e:
+        logger.error(f"Settings update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/settings/test-key")
+async def test_api_key(request: TestKeyRequest):
+    """Test if an API key is valid by making a minimal API call."""
+    try:
+        if request.provider == "openai":
+            from openai import OpenAI
+            client = OpenAI(api_key=request.api_key)
+            client.models.list()
+            return {"valid": True, "message": "OpenAI key is valid"}
+        elif request.provider == "google":
+            import google.generativeai as genai
+            genai.configure(api_key=request.api_key)
+            list(genai.list_models())
+            return {"valid": True, "message": "Google API key is valid"}
+        elif request.provider == "anthropic":
+            import httpx
+            res = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": request.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={"model": "claude-3-5-haiku-20241022", "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]},
+                timeout=15.0,
+            )
+            if res.status_code in (200, 201):
+                return {"valid": True, "message": "Anthropic key is valid"}
+            elif res.status_code == 401:
+                return {"valid": False, "message": "Invalid Anthropic API key"}
+            else:
+                return {"valid": True, "message": "Anthropic key accepted (non-auth error)"}
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown provider: {request.provider}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"valid": False, "message": str(e)}
+
+
+def _register_cloud_models_if_needed(config: Dict[str, Any]):
+    """Register cloud models if API keys are present."""
+    global memory_store
+    if not memory_store:
+        return
+
+    openai_key = config.get("generation", {}).get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+    google_key = config.get("generation", {}).get("google_api_key") or os.getenv("GOOGLE_API_KEY")
+    anthropic_key = config.get("generation", {}).get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")
+
+    models = memory_store.list_models()
+    registered_ids = {m["id"] for m in models}
+
+    if openai_key:
+        if "openai-gpt-4o" not in registered_ids:
+            memory_store.register_model("openai-gpt-4o", "OpenAI GPT-4o", "openai://gpt-4o", 0)
+        if "openai-gpt-4o-mini" not in registered_ids:
+            memory_store.register_model("openai-gpt-4o-mini", "OpenAI GPT-4o Mini", "openai://gpt-4o-mini", 0)
+
+    if google_key:
+        if "gemini-1.5-flash" not in registered_ids:
+            memory_store.register_model("gemini-1.5-flash", "Gemini 1.5 Flash", "gemini://gemini-1.5-flash", 0)
+        if "gemini-2.5-flash" not in registered_ids:
+            memory_store.register_model("gemini-2.5-flash", "Gemini 2.5 Flash", "gemini://gemini-2.5-flash", 0)
+        if "gemini-1.5-pro" not in registered_ids:
+            memory_store.register_model("gemini-1.5-pro", "Gemini 1.5 Pro", "gemini://gemini-1.5-pro", 0)
+
+    if anthropic_key:
+        if "claude-3-5-sonnet" not in registered_ids:
+            memory_store.register_model("claude-3-5-sonnet", "Claude 3.5 Sonnet", "claude://claude-3-5-sonnet-20241022", 0)
+        if "claude-3-5-haiku" not in registered_ids:
+            memory_store.register_model("claude-3-5-haiku", "Claude 3.5 Haiku", "claude://claude-3-5-haiku-20241022", 0)
 
 
 if __name__ == "__main__":
