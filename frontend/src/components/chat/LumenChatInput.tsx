@@ -1,4 +1,4 @@
-import { ChangeEventHandler, KeyboardEventHandler } from "react";
+import { ChangeEventHandler, KeyboardEventHandler, RefObject } from "react";
 
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -14,13 +14,14 @@ interface LumenChatInputProps {
   onFilesSelected: ChangeEventHandler<HTMLInputElement>;
   onFileButtonClick: () => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  fileInputRef: RefObject<HTMLInputElement | null>;
   onKeyDown: KeyboardEventHandler<HTMLTextAreaElement>;
 }
 
 export function LumenChatInput({
   message, isSending, uploading,
   onChangeMessage, onSend, onFilesSelected, onFileButtonClick,
-  textareaRef, onKeyDown,
+  textareaRef, fileInputRef, onKeyDown,
 }: LumenChatInputProps) {
   return (
     <div className="border-t border-white/5 bg-black/20 p-4">
@@ -59,9 +60,10 @@ export function LumenChatInput({
             </Button>
 
             <input
+              ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.doc,.docx,.html,.txt"
+              accept=".pdf,.doc,.docx,.html,.txt,.pptx"
               className="hidden"
               onChange={onFilesSelected}
             />

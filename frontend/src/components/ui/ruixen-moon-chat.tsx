@@ -9,7 +9,8 @@ import type { ChatMessage } from "@/components/chat/types";
 import { LumenSidebar, type Session } from "@/components/chat/LumenSidebar";
 import { ModelLibrary } from "@/components/setup/ModelLibrary";
 import { ModelSelector } from "@/components/chat/ModelSelector";
-import { Menu } from "lucide-react";
+import { SettingsPanel } from "@/components/settings/SettingsPanel";
+import { Menu, Settings } from "lucide-react";
 import { getApiUrl } from "@/lib/api";
 
 interface ActiveModel {
@@ -30,6 +31,7 @@ export default function RuixenMoonChat() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showModelLibrary, setShowModelLibrary] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const { textareaRef, adjustHeight } = useAutoResizeTextarea({ minHeight: 120, maxHeight: 250 });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -221,6 +223,7 @@ export default function RuixenMoonChat() {
     onFilesSelected: handleFilesSelected,
     onFileButtonClick: handleFileButtonClick,
     textareaRef,
+    fileInputRef,
     onKeyDown: handleKeyDown,
   };
 
@@ -247,7 +250,14 @@ export default function RuixenMoonChat() {
         </button>
       </div>
 
-      <div className="absolute top-6 right-6 z-30">
+      <div className="absolute top-6 right-6 z-30 flex items-center gap-2">
+        <button
+          onClick={() => setShowSettings(true)}
+          className="p-2.5 bg-black/40 backdrop-blur-md text-white rounded-xl border border-white/10 hover:bg-black/60 transition-all shadow-xl group"
+          title="Settings"
+        >
+          <Settings size={20} className="text-neutral-300 group-hover:text-white group-hover:rotate-90 transition-all duration-300" />
+        </button>
         <ModelSelector
           activeModel={activeModel}
           onSwitch={handleSwitchModel}
@@ -322,6 +332,12 @@ export default function RuixenMoonChat() {
         onClose={() => setShowModelLibrary(false)}
         activeModelId={activeModel?.id}
         onModelLoaded={fetchActiveModel}
+      />
+
+      <SettingsPanel
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        onSettingsSaved={fetchActiveModel}
       />
     </div>
   );
