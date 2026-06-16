@@ -5,6 +5,11 @@ generation:
   default_temperature: 0.2
   default_max_tokens: 1024
   gpu_layers: -1
+  system_prompt: >-
+    You are a helpful AI assistant. Answer the user's question based on the provided context.
+    If the context doesn't contain enough information to fully answer the question, say so clearly.
+    Be accurate, concise, and helpful.
+  user_instructions: ''
 retrieval:
   default_strategy: semantic
   strategies:
