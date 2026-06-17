@@ -50,3 +50,4 @@
 # OS files
 .DS_Store
 Thumbs.db
+.agents/rules/generation-style.md
