@@ -1,4 +1,4 @@
-import { X, Plus, MessageSquare } from "lucide-react";
+import { X, Plus, MessageSquare, Settings } from "lucide-react";
 
 export interface Session {
     session_id: string;
@@ -13,6 +13,7 @@ interface LumenSidebarProps {
     onNewSession: () => void;
     isOpen: boolean;
     onToggle: () => void;
+    onOpenSettings?: () => void;
 }
 
 export function LumenSidebar({
@@ -21,7 +22,8 @@ export function LumenSidebar({
     onSelectSession,
     onNewSession,
     isOpen,
-    onToggle
+    onToggle,
+    onOpenSettings,
 }: LumenSidebarProps) {
     return (
         <>
@@ -86,6 +88,17 @@ export function LumenSidebar({
                             </button>
                         ))
                     )}
+                </div>
+
+                {/* Settings button at bottom */}
+                <div className="p-4 border-t border-white/5 shrink-0">
+                    <button
+                        onClick={() => { onToggle(); onOpenSettings?.(); }}
+                        className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-neutral-400 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/5 transition-all text-sm font-medium"
+                    >
+                        <Settings size={16} />
+                        Settings
+                    </button>
                 </div>
             </div>
         </>

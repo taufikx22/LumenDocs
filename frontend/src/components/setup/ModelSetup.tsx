@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Loader2, HardDriveUpload } from "lucide-react";
+import { Loader2, HardDriveUpload, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FileBrowser } from "@/components/setup/FileBrowser";
 import { getApiUrl } from "@/lib/api";
@@ -11,6 +11,7 @@ export function ModelSetup({ onComplete }: { onComplete: () => void }) {
     const [registering, setRegistering] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showFileBrowser, setShowFileBrowser] = useState(false);
+    const [hasCloudModels, setHasCloudModels] = useState(false);
 
     useEffect(() => {
         const check = async () => {
@@ -23,17 +24,36 @@ export function ModelSetup({ onComplete }: { onComplete: () => void }) {
                 if (modelsRes.ok) {
                     const models = await modelsRes.json();
                     if (models.length > 0) {
-                        // Models already registered — check if one is loaded
+                        // Check if any are cloud models
+                        const cloud = models.some((m: { gguf_path: string }) =>
+                            m.gguf_path.startsWith("openai://") ||
+                            m.gguf_path.startsWith("gemini://") ||
+                            m.gguf_path.startsWith("claude://")
+                        );
+                        setHasCloudModels(cloud);
+
+                        // Check if one is already loaded
                         const activeRes = await fetch(getApiUrl("/models/active"));
                         if (activeRes.ok) {
                             const active = await activeRes.json();
                             if (active.loaded) { onComplete(); return; }
                         }
-                        // Load the default or first model
+                        // Try to load the default or first model
                         const target = models.find((m: { is_default: boolean }) => m.is_default) || models[0];
-                        await fetch(getApiUrl(`/models/${target.id}/load`), { method: "POST" });
-                        onComplete();
-                        return;
+                        try {
+                            const loadRes = await fetch(getApiUrl(`/models/${target.id}/load`), { method: "POST" });
+                            if (loadRes.ok) {
+                                onComplete();
+                                return;
+                            }
+                        } catch {
+                            // Model load failed — don't block, let user pick
+                        }
+
+                        // If cloud models exist but none loaded, allow skip
+                        if (cloud) {
+                            setHasCloudModels(true);
+                        }
                     }
                 }
                 setChecking(false);
@@ -59,19 +79,29 @@ export function ModelSetup({ onComplete }: { onComplete: () => void }) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name, gguf_path: filePath }),
             });
-            if (!regRes.ok) throw new Error("Registration failed");
+            if (!regRes.ok) {
+                const data = await regRes.json().catch(() => null);
+                throw new Error(data?.detail || "Registration failed");
+            }
             const model = await regRes.json();
 
             // Set as default and load
             await fetch(getApiUrl(`/models/${model.id}/default`), { method: "POST" });
             const loadRes = await fetch(getApiUrl(`/models/${model.id}/load`), { method: "POST" });
-            if (!loadRes.ok) throw new Error("Failed to load model");
+            if (!loadRes.ok) {
+                const data = await loadRes.json().catch(() => null);
+                throw new Error(data?.detail || "Failed to load model");
+            }
 
             onComplete();
-        } catch {
-            setError("Failed to set up the model. Please try again.");
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to set up the model. Please try again.");
             setRegistering(false);
         }
+    };
+
+    const handleSkip = () => {
+        onComplete();
     };
 
     if (checking) {
@@ -99,7 +129,7 @@ export function ModelSetup({ onComplete }: { onComplete: () => void }) {
                     LumenDocs
                 </h1>
                 <p className="mt-4 text-neutral-300 max-w-lg mx-auto text-[15px] leading-relaxed">
-                    Select a local GGUF model to power your AI assistant. Your data stays on your machine.
+                    Select a local GGUF model to power your AI assistant, or skip to use cloud models.
                 </p>
             </div>
 
@@ -127,6 +157,15 @@ export function ModelSetup({ onComplete }: { onComplete: () => void }) {
                 </Button>
             </div>
 
+            {/* Skip button */}
+            <button
+                onClick={handleSkip}
+                className="mt-6 flex items-center gap-2 text-sm text-neutral-400 hover:text-white transition-all group/skip"
+            >
+                <span>{hasCloudModels ? "Skip — use cloud models instead" : "Skip for now — configure models in Settings"}</span>
+                <ArrowRight className="w-4 h-4 group-hover/skip:translate-x-1 transition-transform" />
+            </button>
+
             <div className="flex items-center justify-center flex-wrap gap-4 mt-10 text-[11px] uppercase tracking-[0.25em] font-black text-neutral-500/50 select-none">
                 <span>SECURE</span>
                 <div className="w-1.5 h-1.5 rounded-full bg-neutral-800" />
@@ -144,3 +183,4 @@ export function ModelSetup({ onComplete }: { onComplete: () => void }) {
         </div>
     );
 }
+

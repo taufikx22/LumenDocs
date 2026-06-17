@@ -239,6 +239,7 @@ export default function RuixenMoonChat() {
         onNewSession={handleNewSession}
         isOpen={isSidebarOpen}
         onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+        onOpenSettings={() => setShowSettings(true)}
       />
 
       <div className="absolute top-6 left-6 z-30">
