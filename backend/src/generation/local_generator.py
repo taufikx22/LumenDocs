@@ -12,11 +12,26 @@ class LocalLLMGenerator(BaseGenerator):
 
     def __init__(self, model_manager=None, system_prompt: Optional[str] = None, **kwargs):
         self._manager = model_manager
-        self.system_prompt = system_prompt or (
+        self._default_system_prompt = system_prompt or (
             "You are a helpful AI assistant. Answer the user's question based on the provided context.\n"
             "If the context doesn't contain enough information to fully answer the question, say so clearly.\n"
             "Be accurate, concise, and helpful."
         )
+
+    @property
+    def system_prompt(self) -> str:
+        """Dynamically load system prompt from config if available."""
+        try:
+            from app.config.loader import load_config
+            config = load_config()
+            gen = config.get("generation", {})
+            prompt = gen.get("system_prompt", "") or self._default_system_prompt
+            instructions = gen.get("user_instructions", "")
+            if instructions:
+                prompt = f"{prompt}\n\nAdditional User Instructions:\n{instructions}"
+            return prompt
+        except Exception:
+            return self._default_system_prompt
 
     def set_model_manager(self, manager):
         self._manager = manager
